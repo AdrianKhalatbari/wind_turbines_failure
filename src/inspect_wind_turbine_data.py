@@ -145,6 +145,7 @@ def main() -> None:
             f"{name}: {n_obs} sequential observations, nominally recorded "
             f"every {SAMPLING_INTERVAL_SECONDS} s."
         )
+    print("Measurement type: time series (sequential SCADA measurements).")
     print(
         "No explicit timestamp column is supplied. Recording gaps and "
         "synchronization between turbines therefore cannot be determined."
@@ -166,6 +167,11 @@ def main() -> None:
             f"unique values={healthy[variable].nunique()}. It is retained, "
             "but its autoscaled PCA loading should be interpreted cautiously."
         )
+    print(
+        "Raw variable scales differ substantially. For example, variable 9 "
+        "is approximately 10^7 in magnitude, while some variables have values "
+        "near zero; this supports autoscaling before PCA."
+    )
 
     # (c) The raw plots show several operating levels in variables 5, 11 and
     # 16. Simple maxima and upper quantiles also reveal isolated extremes in
