@@ -53,8 +53,9 @@ def main() -> None:
     pca_x = {name: data.loc[:, pca_variables] for name, data in aligned.items()}
     healthy_x = pca_x[HEALTHY_TURBINE]
 
-    # Autoscale with the healthy-turbine mean and sample standard deviation.
-    # This follows the course guidance that variance acts as a weight in PCA.
+    # Fit pretreatment only on the healthy turbine. Any later turbine must use
+    # these fixed means and scales; the PCA model must not be refitted.
+    # Autoscaling follows the course guidance that variance acts as a weight.
     healthy_mean = healthy_x.mean()
     healthy_scale = healthy_x.std(ddof=1)
     healthy_x_scaled = (healthy_x - healthy_mean) / healthy_scale
@@ -90,6 +91,14 @@ def main() -> None:
         print(f"{name}: {data.shape[0]} observations x {data.shape[1]} variables")
     print(f"Final healthy PCA X: {healthy_x.shape[0]} observations x {healthy_x.shape[1]} variables")
     print("Pretreatment: mean-centering and unit-variance scaling using No.2WT statistics")
+    variable_9 = healthy_x[9]
+    print(
+        "Variable 9 retained: it is not constant "
+        f"({variable_9.nunique()} unique values, raw range "
+        f"{variable_9.max() - variable_9.min():.3g}). Its low relative raw "
+        "variation is influenced by its large offset; autoscaling gives it "
+        "unit variance like the other retained variables."
+    )
 
     print("\nExplained variance")
     for component in range(5):
@@ -243,15 +252,17 @@ def create_pca_plots(
     fig.savefig(OUTPUT_DIR / "pca_healthy_loading_contributions.png", dpi=160)
     plt.close(fig)
 
-    # Biplots combine scores with loading directions. All arrows are shown;
-    # labels are limited to the strongest directions to keep the plots legible.
+    # Biplots combine scores with loading directions. One common scale factor
+    # is used for both arrow coordinates so their relative angles are preserved.
+    # Correlations are interpreted primarily from the separate loading plot.
     biplot_pairs = [(0, 1), (0, 2)]
     fig, axes = plt.subplots(1, 2, figsize=(16, 7), constrained_layout=True)
     for axis, (x_pc, y_pc) in zip(axes, biplot_pairs):
         axis.scatter(scores[:, x_pc], scores[:, y_pc], color="tab:blue", s=10, alpha=0.2)
         score_extent = np.percentile(np.abs(scores[:, [x_pc, y_pc]]), 98, axis=0)
         loading_pair = loadings[:, [x_pc, y_pc]]
-        arrow_scale = 0.78 * score_extent / np.max(np.abs(loading_pair), axis=0)
+        component_limits = score_extent / np.max(np.abs(loading_pair), axis=0)
+        arrow_scale = 0.78 * component_limits.min()
         if y_pc == 1:
             label_indices = set(
                 np.argsort(np.linalg.norm(loading_pair, axis=1))[::-1][:12]
@@ -261,8 +272,8 @@ def create_pca_plots(
             # loadings are almost equal and their labels would overlap.
             label_indices = set(np.argsort(np.abs(loadings[:, y_pc]))[::-1][:4])
         for index, (variable, loading) in enumerate(zip(variables, loading_pair)):
-            end_x = loading[0] * arrow_scale[0]
-            end_y = loading[1] * arrow_scale[1]
+            end_x = loading[0] * arrow_scale
+            end_y = loading[1] * arrow_scale
             axis.arrow(0, 0, end_x, end_y, color="tab:red", alpha=0.55,
                        width=0.01, head_width=0.15, length_includes_head=True)
             if index in label_indices:
@@ -274,8 +285,9 @@ def create_pca_plots(
         axis.set_xlabel(f"PC{x_pc + 1} scores ({100 * explained_ratio[x_pc]:.2f}%)")
         axis.set_ylabel(f"PC{y_pc + 1} scores ({100 * explained_ratio[y_pc]:.2f}%)")
         axis.set_title(f"PC{x_pc + 1}-PC{y_pc + 1}")
+        axis.set_aspect("equal", adjustable="box")
         axis.grid(alpha=0.2)
-    fig.suptitle("Healthy-turbine PCA biplots (loading arrows scaled for display)")
+    fig.suptitle("Healthy-turbine PCA biplots (loading arrows uniformly scaled)")
     fig.savefig(OUTPUT_DIR / "pca_healthy_biplot.png", dpi=160)
     plt.close(fig)
 
