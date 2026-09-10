@@ -2,6 +2,12 @@
 
 This script reports raw-data challenges and creates a few simple raw-data
 plots. It does not perform imputation, scaling, centering, PCA, or modelling.
+
+Dataset context (from the project description): the SCADA measurements are
+nominally recorded every 10 seconds and ordered sequentially. There is no
+timestamp column, so continuity and synchronization between turbines cannot
+be verified. WT2 is healthy and the other turbines develop faults. Variable
+names and their physical meanings are not supplied.
 """
 
 from pathlib import Path
@@ -19,7 +25,14 @@ DATA_FILE = PROJECT_DIR / "resources" / "wind_turbine_fault_diagnosis_data.xlsx"
 OUTPUT_DIR = PROJECT_DIR / "outputs"
 PCA_CANDIDATES = ["No.2WT", "No.14WT", "No.39WT"]
 COMMON_COLUMNS = list(range(1, 28))
-PLOT_COLUMNS = [1, 5, 9, 11, 23]
+PLOT_COLUMNS = [1, 5, 9, 11, 16]
+
+# Nominal SCADA sampling interval, used only for reporting the time base.
+SAMPLING_INTERVAL_SECONDS = 10
+
+# Variables highlighted for cautious interpretation without altering them.
+LOW_RELATIVE_VARIATION_VARIABLES = [9]
+REGIME_VARIABLES = [5, 11, 16]
 
 
 def main() -> None:
@@ -119,6 +132,65 @@ def main() -> None:
     print("Remove variable 28 from No.2WT so all candidate X matrices have 27 columns.")
     print("No.14WT column 9 remains missing and must be handled before PCA.")
 
+    # Explicit summary of the data challenges required by the assignment.
+    # These are reported for the write-up only; no data is altered here.
+    print("\nData challenges summary")
+
+    # (a) The rows are sequential SCADA observations with a nominal 10-second
+    # interval. Without timestamps, elapsed duration, gaps and synchronization
+    # between turbines cannot be checked directly.
+    for name in PCA_CANDIDATES:
+        n_obs = datasets[name].shape[0]
+        print(
+            f"{name}: {n_obs} sequential observations, nominally recorded "
+            f"every {SAMPLING_INTERVAL_SECONDS} s."
+        )
+    print(
+        "No explicit timestamp column is supplied. Recording gaps and "
+        "synchronization between turbines therefore cannot be determined."
+    )
+
+    # (b) Variable 9 has a very large offset and little relative variation in
+    # the healthy turbine. Its meaning is unknown, so it is retained rather
+    # than labelled defective or removed.
+    healthy = datasets[PCA_CANDIDATES[0]]
+    for variable in LOW_RELATIVE_VARIATION_VARIABLES:
+        mean = healthy[variable].mean()
+        std = healthy[variable].std(ddof=1)
+        value_range = healthy[variable].max() - healthy[variable].min()
+        relative_std = std / abs(mean) if mean else float("inf")
+        print(
+            f"Variable {variable} in {PCA_CANDIDATES[0]} has a large offset "
+            f"and low relative variation: mean={mean:.3g}, std={std:.3g}, "
+            f"range={value_range:.3g}, relative std={relative_std:.2e}, "
+            f"unique values={healthy[variable].nunique()}. It is retained, "
+            "but its autoscaled PCA loading should be interpreted cautiously."
+        )
+
+    # (c) The raw plots show several operating levels in variables 5, 11 and
+    # 16. Simple maxima and upper quantiles also reveal isolated extremes in
+    # No.14WT variables 5 and 11; these observations are only documented here.
+    print(
+        f"Variables with multiple levels or operating regimes in the raw "
+        f"plots: {REGIME_VARIABLES}. Their unknown physical meanings prevent "
+        "a more specific interpretation at this stage."
+    )
+    for variable in REGIME_VARIABLES:
+        ranges = {
+            name: float(datasets[name][variable].max() - datasets[name][variable].min())
+            for name in PCA_CANDIDATES
+            if variable in datasets[name].columns
+        }
+        formatted = ", ".join(f"{name}={value:.3g}" for name, value in ranges.items())
+        print(f"  variable {variable} raw range per turbine: {formatted}")
+    for variable in [5, 11]:
+        data = datasets["No.14WT"][variable].dropna()
+        print(
+            f"  No.14WT variable {variable}: maximum={data.max():.3g}, "
+            f"99th percentile={data.quantile(0.99):.3g}; the maximum is an "
+            "obvious isolated extreme value."
+        )
+
     # Create only the representative distribution and sequence plots needed
     # to understand the raw measurements before PCA.
     create_plots(datasets)
@@ -164,7 +236,7 @@ def create_plots(datasets: dict[str, pd.DataFrame]) -> None:
             )
         axis.set_ylabel(f"Var {column}")
         axis.grid(alpha=0.25)
-    axes[-1].set_xlabel("Observation order")
+    axes[-1].set_xlabel("Observation order (nominal 10 s sampling)")
     axes[0].legend(fontsize=8, ncol=3)
     fig.suptitle("Selected raw variables over observation order")
     fig.savefig(OUTPUT_DIR / "step2_observation_order.png", dpi=160)
