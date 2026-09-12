@@ -338,6 +338,84 @@ def create_pca_plots(
     fig.savefig(OUTPUT_DIR / "pca_healthy_correlation_heatmap.png", dpi=160)
     plt.close(fig)
 
+    # A separate TA-style overview pairs biplots with signed loading bars.
+    # Existing PCA figures above are retained unchanged.
+    create_biplot_loading_overview(
+        variables, scores, loadings, explained_ratio
+    )
+
+
+def create_biplot_loading_overview(
+    variables: list[int],
+    scores: np.ndarray,
+    loadings: np.ndarray,
+    explained_ratio: np.ndarray,
+) -> None:
+    """Pair score/loading biplots with loading bars for PC1-PC3."""
+    biplot_pairs = [(0, 1), (1, 2), (0, 2)]
+    fig, axes = plt.subplots(2, 3, figsize=(16, 9), constrained_layout=True)
+
+    # Top row: three score plots with loading directions.
+    for axis, (x_pc, y_pc) in zip(axes[0], biplot_pairs):
+        axis.scatter(
+            scores[:, x_pc], scores[:, y_pc],
+            color="tab:red", s=5, alpha=0.25
+        )
+        loading_pair = loadings[:, [x_pc, y_pc]]
+        score_extent = np.percentile(np.abs(scores[:, [x_pc, y_pc]]), 98, axis=0)
+        component_limits = score_extent / np.max(np.abs(loading_pair), axis=0)
+        arrow_scale = 0.72 * component_limits.min()
+        label_indices = set(
+            np.argsort(np.linalg.norm(loading_pair, axis=1))[::-1][:10]
+        )
+
+        for index, (variable, loading) in enumerate(zip(variables, loading_pair)):
+            end_x = loading[0] * arrow_scale
+            end_y = loading[1] * arrow_scale
+            axis.arrow(
+                0, 0, end_x, end_y,
+                color="tab:blue", alpha=0.65, width=0.008,
+                head_width=0.12, length_includes_head=True,
+            )
+            if index in label_indices:
+                axis.annotate(
+                    str(variable), (end_x, end_y), xytext=(3, 3),
+                    textcoords="offset points", fontsize=7, color="tab:blue",
+                )
+
+        axis.axhline(0, color="0.5", linewidth=0.8)
+        axis.axvline(0, color="0.5", linewidth=0.8)
+        axis.set_xlabel(
+            f"PC{x_pc + 1} scores ({100 * explained_ratio[x_pc]:.2f}%)"
+        )
+        axis.set_ylabel(
+            f"PC{y_pc + 1} scores ({100 * explained_ratio[y_pc]:.2f}%)"
+        )
+        axis.set_title(f"Biplot: PC{x_pc + 1}-PC{y_pc + 1}")
+        axis.set_aspect("equal", adjustable="box")
+        axis.grid(alpha=0.2)
+
+    # Bottom row: signed loadings for the first three components.
+    positions = np.arange(len(variables))
+    for component, axis in enumerate(axes[1]):
+        axis.bar(
+            positions, loadings[:, component],
+            color="tab:blue", edgecolor="black", linewidth=0.4,
+        )
+        axis.axhline(0, color="0.4", linewidth=0.8)
+        axis.set_xticks(positions, labels=variables, rotation=90, fontsize=7)
+        axis.set_xlabel("Variable")
+        axis.set_ylabel("Loading")
+        axis.set_title(
+            f"Loadings of PC{component + 1} "
+            f"({100 * explained_ratio[component]:.2f}%)"
+        )
+        axis.grid(axis="y", alpha=0.2)
+
+    fig.suptitle("Healthy-turbine PCA biplots and signed loadings")
+    fig.savefig(OUTPUT_DIR / "pca_healthy_biplot_loading_overview.png", dpi=160)
+    plt.close(fig)
+
 
 if __name__ == "__main__":
     main()
