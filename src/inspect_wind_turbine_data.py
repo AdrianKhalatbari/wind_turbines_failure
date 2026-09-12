@@ -42,11 +42,13 @@ def main() -> None:
     # observation and each column a predictor.
     datasets = pd.read_excel(DATA_FILE, sheet_name=None, header=0)
 
+    print("\n========================================================")
     print(f"Workbook: {DATA_FILE.name}")
     print(f"Sheets: {', '.join(datasets)}")
-    print("\nDataset dimensions and structural checks")
+    print("========================================================")
 
-    # Check dimensions, data types, numeric content, and missing cells.
+    print("\nDataset dimensions and structural checks\n")
+    # ============================ Check dimensions, data types, numeric content, and missing cells ===========================
     column_sets = {}
     for name, data in datasets.items():
         column_sets[name] = list(data.columns)
@@ -60,21 +62,22 @@ def main() -> None:
         }
 
         print(
-            f"{name}: observations={data.shape[0]}, variables={data.shape[1]}, "
-            f"dtypes={data.dtypes.astype(str).value_counts().to_dict()}"
+            f"{name}: \nobservations={data.shape[0]}, \nvariables={data.shape[1]}, "
+            f"\ndtypes={data.dtypes.astype(str).value_counts().to_dict()}"
         )
         print(
-            f"  all columns numeric: {non_numeric_cells == 0}; "
-            f"missing cells: {missing_cells}"
+            f"all columns numeric: {non_numeric_cells == 0}; "
+            f"\nmissing cells: {missing_cells}"
         )
         if missing_columns:
-            print(f"  columns with missing values: {missing_columns}")
+            print(f"columns with missing values: {missing_columns}")
+        print("-------------------------------")
 
-    # Locate missing cells and print their nearby raw observations without
-    # filling or otherwise changing the data.
+    # ============================ Locate missing cells and print their nearby raw observations without filling or otherwise changing the data ===========================
+    print("\n========================================================")
     print("\nMissing-value inspection")
     for name, data in datasets.items():
-        for row_index, column_index in zip(*data.isna().to_numpy().nonzero()):
+        for row_index, column_index in zip(*data.isna().to_numpy().nonzero()): # Zip the row and column indices of missing values like (array([0, 2]), array([2, 0]))
             column = data.columns[column_index]
             print(
                 f"{name}, column {column}: observation {row_index + 1} "
@@ -85,9 +88,9 @@ def main() -> None:
             left = max(0, column_index - 2)
             right = min(data.shape[1], column_index + 3)
             print(data.iloc[start:stop, left:right].to_string())
+    print("\n========================================================")
 
-    # Save raw descriptive statistics for every turbine before making the
-    # structural selection used later for PCA.
+    # ============================ Save raw descriptive statistics for every turbine before making the structural selection used later for PCA ===========================
     stats = []
     for name in ALL_TURBINES:
         summary = datasets[name].describe().T
@@ -109,9 +112,10 @@ def main() -> None:
             f"largest raw ranges={largest_ranges}"
         )
 
-    # Compare supplied column identifiers between turbine sheets.
+    # ============================ Compare supplied column identifiers between turbine sheets ===========================
     reference_name = next(iter(column_sets))
     reference_columns = column_sets[reference_name]
+    print("\n========================================================")
     print("\nColumn consistency")
     print(f"Reference sheet: {reference_name}")
     for name, columns in column_sets.items():
@@ -162,13 +166,13 @@ def main() -> None:
     print("No.14WT column 9 remains missing and must be handled before PCA.")
     print("\n========================================================")
 
-    # Explicit summary of the data challenges required by the assignment.
-    # These are reported for the write-up only; no data is altered here.
+    # ============================ Explicit summary of the data challenges required by the assignment. ===========================
     print("\nData challenges summary")
 
     # (a) The rows are sequential SCADA observations with a nominal 10-second
     # interval. Without timestamps, elapsed duration, gaps and synchronization
     # between turbines cannot be checked directly.
+    print("\n(a) Sequential observations and nominal sampling interval")
     for name in PCA_CANDIDATES:
         n_obs = datasets[name].shape[0]
         print(
@@ -184,6 +188,7 @@ def main() -> None:
     # (b) Variable 9 has a very large offset and little relative variation in
     # the healthy turbine. Its meaning is unknown, so it is retained rather
     # than labelled defective or removed.
+    print("\n(b) Variable 9 has a large offset and low relative variation")
     healthy = datasets[PCA_CANDIDATES[0]]
     for variable in LOW_RELATIVE_VARIATION_VARIABLES:
         mean = healthy[variable].mean()
@@ -206,6 +211,7 @@ def main() -> None:
     # (c) The raw plots show several operating levels in variables 5, 11 and
     # 16. Simple maxima and upper quantiles also reveal isolated extremes in
     # No.14WT variables 5 and 11; these observations are only documented here.
+    print("\n(c) Variables with multiple levels or operating regimes")
     print(
         f"Variables with multiple levels or operating regimes in the raw "
         f"plots: {REGIME_VARIABLES}. Their unknown physical meanings prevent "
@@ -227,6 +233,7 @@ def main() -> None:
             "obvious isolated extreme value."
         )
 
+    # ============================ Create representative raw-data plots for PCA candidates ===========================
     # Create only the representative distribution and sequence plots needed
     # to understand the raw measurements before PCA.
     create_plots(datasets)
