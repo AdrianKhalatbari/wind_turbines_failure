@@ -12,7 +12,6 @@ names and their physical meanings are not supplied.
 Note: The script lives in src/, while the source workbook is kept in resources/ and the output plots and CSV files are written to outputs/.
 """
 
-# Import standard libraries
 from pathlib import Path
 import pandas as pd
 import matplotlib

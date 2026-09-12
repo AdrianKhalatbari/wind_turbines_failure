@@ -3,22 +3,22 @@
 The analysis follows the course workflow: construct X, resolve essential
 data issues, autoscale the healthy data, and compute PCA through SVD.
 No response variable, fault label, or supervised method is used.
+
+Note: Selected turbines are based on the ininitial inspection of the raw data. The healthy turbine is used to fit the PCA model, 
+        and its statistics are used to autoscale the other turbines for later projection.
 """
 
 from pathlib import Path
-
 import matplotlib
 import numpy as np
 import pandas as pd
-
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-
+# Define constants for file paths and turbine selection. The healthy turbine is used to fit the PCA model.
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 DATA_FILE = PROJECT_DIR / "resources" / "wind_turbine_fault_diagnosis_data.xlsx"
 OUTPUT_DIR = PROJECT_DIR / "outputs"
-
 TURBINES = ["No.2WT", "No.14WT", "No.39WT"]
 COMMON_VARIABLES = list(range(1, 28))
 HEALTHY_TURBINE = "No.2WT"
@@ -100,6 +100,7 @@ def main() -> None:
         "unit variance like the other retained variables."
     )
 
+    print("\n========================================================")
     print("\nExplained variance")
     for component in range(5):
         print(
@@ -121,6 +122,7 @@ def main() -> None:
 
     # Correlations support the interpretation of variables pointing in similar
     # or opposite directions in the loading plots and biplots.
+    print("\n========================================================")
     correlation = healthy_x.corr()
     pairs = correlation.where(np.triu(np.ones(correlation.shape), k=1).astype(bool)).stack()
     print("\nStrongest positive healthy-variable correlations")
@@ -141,7 +143,39 @@ def save_numeric_outputs(
     explained_ratio: np.ndarray,
     cumulative_ratio: np.ndarray,
 ) -> None:
-    """Save compact tables supporting interpretation and later projection."""
+    """
+    Save PCA results and autoscaling parameters as CSV files.
+
+    Creates compact output tables containing the explained variance of each
+    principal component, PCA loadings, scores for the first five principal
+    components, and the mean and standard deviation used to autoscale the
+    healthy-turbine data. These outputs support PCA interpretation and allow
+    new observations to be projected using the same preprocessing parameters.
+
+    Parameters
+    ----------
+    variables : list[int]
+        Identifiers of the variables included in the PCA model.
+    means : pd.Series
+        Mean value of each variable in the healthy-turbine data, used for
+        centering during autoscaling.
+    scales : pd.Series
+        Standard deviation of each variable in the healthy-turbine data, used
+        for scaling during autoscaling.
+    scores : np.ndarray
+        PCA score matrix containing the projected observations in principal
+        component space.
+    loadings : np.ndarray
+        PCA loading matrix describing the contribution of each original
+        variable to each principal component.
+    explained_variance : np.ndarray
+        Variance explained by each principal component.
+    explained_ratio : np.ndarray
+        Fraction of the total variance explained by each principal component.
+    cumulative_ratio : np.ndarray
+        Cumulative fraction of total variance explained by successive
+        principal components.
+    """
     component_names = [f"PC{i}" for i in range(1, len(variables) + 1)]
 
     pd.DataFrame(
