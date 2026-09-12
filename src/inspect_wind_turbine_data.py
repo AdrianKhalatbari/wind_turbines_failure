@@ -8,21 +8,22 @@ nominally recorded every 10 seconds and ordered sequentially. There is no
 timestamp column, so continuity and synchronization between turbines cannot
 be verified. WT2 is healthy and the other turbines develop faults. Variable
 names and their physical meanings are not supplied.
+
+Note: The script lives in src/, while the source workbook is kept in resources/ and the output plots and CSV files are written to outputs/.
 """
 
+# Import standard libraries
 from pathlib import Path
-
 import pandas as pd
 import matplotlib
-
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-
-# The script lives in src/, while the source workbook is kept in resources/.
+# Define constants for file paths, turbine names, and variable identifiers.
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 DATA_FILE = PROJECT_DIR / "resources" / "wind_turbine_fault_diagnosis_data.xlsx"
 OUTPUT_DIR = PROJECT_DIR / "outputs"
+ALL_TURBINES = ["No.2WT", "No.3", "No.14WT", "No.39WT"]
 PCA_CANDIDATES = ["No.2WT", "No.14WT", "No.39WT"]
 COMMON_COLUMNS = list(range(1, 28))
 PLOT_COLUMNS = [1, 5, 9, 11, 16]
@@ -85,10 +86,10 @@ def main() -> None:
             right = min(data.shape[1], column_index + 3)
             print(data.iloc[start:stop, left:right].to_string())
 
-    # Save descriptive statistics for the three turbines being considered for
-    # PCA. These are raw statistics, before any pretreatment.
+    # Save raw descriptive statistics for every turbine before making the
+    # structural selection used later for PCA.
     stats = []
-    for name in PCA_CANDIDATES:
+    for name in ALL_TURBINES:
         summary = datasets[name].describe().T
         summary["range"] = summary["max"] - summary["min"]
         summary.insert(0, "turbine", name)
@@ -98,7 +99,7 @@ def main() -> None:
         OUTPUT_DIR / "step2_raw_descriptive_statistics.csv", index=False
     )
 
-    print("\nRaw scale and distribution checks for PCA candidates")
+    print("\nRaw scale and distribution checks for all turbines")
     for summary in stats:
         name = summary["turbine"].iloc[0]
         constant = summary.loc[summary["std"] == 0, "variable"].tolist()
@@ -125,12 +126,41 @@ def main() -> None:
         if extra_in_sheet:
             print(f"  extra labels: {extra_in_sheet}")
 
-    # Record the current candidate set and common raw-variable structure.
+    # ============================ Compare raw distribution and scale profiles for variables 1-27 ===========================
+    # This supports the structural decision but cannot prove that
+    # anonymous variables have the same physical meaning across turbines.
+    create_selection_comparison_plot(stats)
+    print("\n========================================================")
+    print("\nSupporting comparison for turbine selection")
+    print(
+        "Variables 1-27 are compared across all turbines using median, "
+        "standard deviation and range in step2_all_turbine_scale_profiles.png."
+    )
+    print(
+        "The comparison is supporting evidence only: the anonymous variable "
+        "meanings and ordering cannot be verified without sensor metadata."
+    )
+
+    # Record the candidate set and common raw-variable structure. The project
+    # hint and the uniquely incompatible variable count remain the main basis.
+    sheets_with_variable_28 = [
+        name for name, data in datasets.items() if 28 in data.columns
+    ]
     print("\nCandidate PCA data")
-    print("Exclude No.3 because its 31-variable structure is incompatible with the other turbines.")
+    print(
+        "Exclude No.3: it is the only faulty turbine with 31 variables, "
+        "consistent with the project hint to remove one faulty turbine with "
+        "an incompatible variable count."
+    )
     print(f"Retain common variables: {COMMON_COLUMNS}")
-    print("Remove variable 28 from No.2WT so all candidate X matrices have 27 columns.")
+    print(f"Sheets containing variable 28: {sheets_with_variable_28}")
+    print(
+        "Variable 28 is the final variable of No.2WT and is absent from the "
+        "other retained turbines, consistent with the project hint that one "
+        "extra final variable must be removed."
+    )
     print("No.14WT column 9 remains missing and must be handled before PCA.")
+    print("\n========================================================")
 
     # Explicit summary of the data challenges required by the assignment.
     # These are reported for the write-up only; no data is altered here.
@@ -246,6 +276,57 @@ def create_plots(datasets: dict[str, pd.DataFrame]) -> None:
     axes[0].legend(fontsize=8, ncol=3)
     fig.suptitle("Selected raw variables over observation order")
     fig.savefig(OUTPUT_DIR / "step2_observation_order.png", dpi=160)
+    plt.close(fig)
+
+
+
+def create_selection_comparison_plot(stats: list[pd.DataFrame]) -> None:
+    """
+    Plot distribution and scale statistics for the common turbine variables.
+
+    Combines the supplied summary-statistics DataFrames, keeps variables that
+    are shared across all turbines, and compares their absolute median,
+    standard deviation, and range. Each statistic is plotted on a logarithmic
+    scale to make differences in variable magnitude easier to compare.
+
+    The resulting figure is saved to ``OUTPUT_DIR`` as
+    ``step2_all_turbine_scale_profiles.png``.
+    """
+    combined = pd.concat(stats, ignore_index=True)
+    combined = combined[combined["variable"].isin(COMMON_COLUMNS)]
+    colors = {
+        "No.2WT": "tab:blue",
+        "No.3": "tab:red",
+        "No.14WT": "tab:orange",
+        "No.39WT": "tab:green",
+    }
+
+    fig, axes = plt.subplots(3, 1, figsize=(12, 9), sharex=True, constrained_layout=True)
+    for axis, statistic, title in zip(
+        axes,
+        ["50%", "std", "range"],
+        ["Absolute median", "Standard deviation", "Range"],
+    ):
+        for name in ALL_TURBINES:
+            turbine_stats = combined[combined["turbine"] == name]
+            values = turbine_stats[statistic].abs().replace(0, float("nan"))
+            axis.plot(
+                turbine_stats["variable"],
+                values,
+                marker="o",
+                markersize=3,
+                linewidth=1,
+                label=name,
+                color=colors[name],
+            )
+        axis.set_yscale("log")
+        axis.set_ylabel(title)
+        axis.grid(alpha=0.25)
+
+    axes[-1].set_xlabel("Supplied variable identifier")
+    axes[0].legend(fontsize=8, ncol=4)
+    fig.suptitle("Raw distribution and scale profiles for variables 1-27")
+    fig.savefig(OUTPUT_DIR / "step2_all_turbine_scale_profiles.png", dpi=160)
     plt.close(fig)
 
 
