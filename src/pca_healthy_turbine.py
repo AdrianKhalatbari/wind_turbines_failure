@@ -39,10 +39,10 @@ def main() -> None:
         for name in TURBINES
     }
 
-    # The one missing value occurs in a single No.14WT row. Remove that row
-    # rather than inventing a sensor value at an apparent operating transition.
+    # Preserve the time-series row and estimate the single missing value from
+    # its adjacent observations using linear interpolation in observation order.
     missing_rows = aligned["No.14WT"].index[aligned["No.14WT"].isna().any(axis=1)]
-    aligned["No.14WT"] = aligned["No.14WT"].drop(index=missing_rows).reset_index(drop=True)
+    aligned["No.14WT"] = aligned["No.14WT"].interpolate(method="linear", axis=0)
 
     # Variables 12 and 15 are constant in the healthy turbine. They cannot be
     # autoscaled and contain no variation for the healthy PCA model.
@@ -84,7 +84,7 @@ def main() -> None:
     print("Aligned X matrices before PCA variable removal")
     for name, data in aligned.items():
         print(f"{name}: {data.shape[0]} observations x {data.shape[1]} variables")
-    print(f"Removed No.14WT observation: {missing_rows[0] + 1}")
+    print(f"Interpolated missing value in No.14WT observation: {missing_rows[0] + 1}")
     print(f"Excluded zero-variance healthy variables: {constant_variables}")
     print("PCA-ready aligned X matrices")
     for name, data in pca_x.items():
