@@ -1,0 +1,3 @@
+turbine,variable,lower_iqr_limit,upper_iqr_limit,values_outside_iqr_limits,99th_percentile,maximum,maximum_observation,second_largest
+No.14WT,5,-641.8518577149999,1069.811529629,0,500.05741274,1021.722295,358,605.6627197
+No.14WT,11,-2183.4527860075,3653.2182044045,1,1537.13876315,17052.87489,358,1652.765015
