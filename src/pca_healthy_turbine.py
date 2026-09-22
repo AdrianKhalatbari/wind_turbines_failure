@@ -65,6 +65,12 @@ def main() -> None:
     constant_variables = healthy_std.index[healthy_std == 0].tolist()
     pca_variables = [variable for variable in COMMON_VARIABLES if variable not in constant_variables]
     pca_x = {name: data.loc[:, pca_variables] for name, data in aligned.items()}
+
+    # All turbines must contain the same variables in the same order before
+    # healthy-model fitting or any later projection.
+    expected_columns = pd.Index(pca_variables)
+    assert all(data.columns.equals(expected_columns) for data in pca_x.values())
+
     healthy_x = pca_x[HEALTHY_TURBINE]
 
     # Fit pretreatment only on the healthy turbine. Any later turbine must use
@@ -111,6 +117,8 @@ def main() -> None:
     )
     print("---")
     print(f"Excluded zero-variance healthy variables: {constant_variables}")
+    print("---")
+    print(f"Final variables used for every retained turbine: {pca_variables}")
     print("---")
     print("PCA-ready aligned X matrices:")
     for name, data in pca_x.items():
