@@ -72,7 +72,11 @@ def main() -> None:
     # Autoscaling follows the course guidance that variance acts as a weight.
     healthy_mean = healthy_x.mean()
     healthy_scale = healthy_x.std(ddof=1)
-    healthy_x_scaled = (healthy_x - healthy_mean) / healthy_scale
+    scaled_x = {
+        name: (data - healthy_mean) / healthy_scale
+        for name, data in pca_x.items()
+    }
+    healthy_x_scaled = scaled_x[HEALTHY_TURBINE]
 
     # Compute PCA through economy SVD: scores T = U*S and loadings P = V.
     u, singular_values, vt = np.linalg.svd(healthy_x_scaled.to_numpy(), full_matrices=False)
@@ -92,6 +96,7 @@ def main() -> None:
         explained_ratio,
         cumulative_ratio,
     )
+    create_pretreated_data_plot(scaled_x, pca_variables)
     create_pca_plots(healthy_x, pca_variables, scores, loadings, explained_ratio, cumulative_ratio)
 
     # Report the main pretreatment and PCA results needed for the next step.
@@ -224,6 +229,37 @@ def save_numeric_outputs(
     pd.DataFrame(
         {"variable": variables, "healthy_mean": means, "healthy_std": scales}
     ).to_csv(OUTPUT_DIR / "pca_healthy_autoscaling_parameters.csv", index=False)
+
+
+def create_pretreated_data_plot(
+    scaled_x: dict[str, pd.DataFrame], variables: list[int]
+) -> None:
+    """Visualize the cleaned and autoscaled data for the retained turbines."""
+    fig, axes = plt.subplots(3, 1, figsize=(14, 10), constrained_layout=True)
+
+    for axis, (name, data) in zip(axes, scaled_x.items()):
+        image = axis.imshow(
+            data.to_numpy().T,
+            aspect="auto",
+            cmap="coolwarm",
+            vmin=-4,
+            vmax=4,
+            interpolation="nearest",
+        )
+        axis.set_yticks(np.arange(len(variables)), labels=variables, fontsize=8)
+        axis.set_ylabel("Variable")
+        axis.set_xlabel("Observation order")
+        axis.set_title(f"{name}: cleaned and autoscaled data")
+
+    fig.colorbar(
+        image,
+        ax=axes,
+        label="Autoscaled value (colour display limited to -4 to +4)",
+        shrink=0.9,
+    )
+    fig.suptitle("Pretreated wind-turbine data using healthy-turbine scaling")
+    fig.savefig(OUTPUT_DIR / "pretreatment_autoscaled_data.png", dpi=160)
+    plt.close(fig)
 
 
 def create_pca_plots(
