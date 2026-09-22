@@ -41,8 +41,22 @@ def main() -> None:
 
     # Preserve the time-series row and estimate the single missing value from
     # its adjacent observations using linear interpolation in observation order.
-    missing_rows = aligned["No.14WT"].index[aligned["No.14WT"].isna().any(axis=1)]
+    faulty_x = aligned["No.14WT"]
+    missing_row, missing_column = np.argwhere(faulty_x.isna().to_numpy())[0]
+    missing_variable = faulty_x.columns[missing_column]
+    original_row_count = len(faulty_x)
+    expected_value = (
+        faulty_x.iloc[missing_row - 1, missing_column]
+        + faulty_x.iloc[missing_row + 1, missing_column]
+    ) / 2
+
     aligned["No.14WT"] = aligned["No.14WT"].interpolate(method="linear", axis=0)
+    interpolated_value = aligned["No.14WT"].iloc[missing_row, missing_column]
+
+    # Verify that interpolation preserves the sequence and fills the known gap.
+    assert len(aligned["No.14WT"]) == original_row_count
+    assert not aligned["No.14WT"].isna().any().any()
+    assert np.isclose(interpolated_value, expected_value)
 
     # Variables 12 and 15 are constant in the healthy turbine. They cannot be
     # autoscaled and contain no variation for the healthy PCA model.
@@ -84,14 +98,24 @@ def main() -> None:
     print("Aligned X matrices before PCA variable removal")
     for name, data in aligned.items():
         print(f"{name}: {data.shape[0]} observations x {data.shape[1]} variables")
-    print(f"Interpolated missing value in No.14WT observation: {missing_rows[0] + 1}")
+    print("---")
+    print(
+        f"No.14WT variable {missing_variable}, observation {missing_row + 1}: "
+        f"linear interpolation = {interpolated_value:.0f}; "
+        f"rows preserved = {original_row_count}"
+    )
+    print("---")
     print(f"Excluded zero-variance healthy variables: {constant_variables}")
-    print("PCA-ready aligned X matrices")
+    print("---")
+    print("PCA-ready aligned X matrices:")
     for name, data in pca_x.items():
         print(f"{name}: {data.shape[0]} observations x {data.shape[1]} variables")
+    print("---")
     print(f"Final healthy PCA X: {healthy_x.shape[0]} observations x {healthy_x.shape[1]} variables")
+    print("---")
     print("Pretreatment: mean-centering and unit-variance scaling using No.2WT statistics")
     variable_9 = healthy_x[9]
+    print("---")
     print(
         "Variable 9 retained: it is not constant "
         f"({variable_9.nunique()} unique values, raw range "
@@ -110,7 +134,7 @@ def main() -> None:
     for threshold in (0.80, 0.90, 0.95):
         count = int(np.searchsorted(cumulative_ratio, threshold) + 1)
         print(f"Components for {int(threshold * 100)}% cumulative variance: {count}")
-
+    print("---")
     print("\nVariables contributing most to the first three PCs")
     for component in range(3):
         order = np.argsort(np.abs(loadings[:, component]))[::-1][:6]
@@ -128,6 +152,7 @@ def main() -> None:
     print("\nStrongest positive healthy-variable correlations")
     for (first, second), value in pairs.sort_values(ascending=False).head(6).items():
         print(f"Variables {first} and {second}: r = {value:.3f}")
+    print("---")
     print("Strongest negative healthy-variable correlations")
     for (first, second), value in pairs.sort_values().head(6).items():
         print(f"Variables {first} and {second}: r = {value:.3f}")
