@@ -39,6 +39,10 @@ def main() -> None:
         name: workbook[name].loc[:, COMMON_VARIABLES].copy()
         for name in TURBINES
     }
+    missing_values_before = {
+        name: int(data.isna().sum().sum())
+        for name, data in aligned.items()
+    }
 
     # Preserve the time-series row and estimate the single missing value from
     # its adjacent observations using linear interpolation in observation order.
@@ -105,6 +109,9 @@ def main() -> None:
         explained_variance,
         explained_ratio,
         cumulative_ratio,
+    )
+    save_pretreatment_summary(
+        aligned, pca_x, constant_variables, missing_values_before
     )
     create_pretreated_data_plot(scaled_x, pca_variables)
     create_pca_plots(healthy_x, pca_variables, scores, loadings, explained_ratio, cumulative_ratio)
@@ -239,8 +246,47 @@ def save_numeric_outputs(
     score_table.to_csv(OUTPUT_DIR / "pca_healthy_scores_first5.csv")
 
     pd.DataFrame(
-        {"variable": variables, "healthy_mean": means, "healthy_std": scales}
+        {
+            "variable": variables,
+            "healthy_mean": means,
+            "healthy_std": scales,
+            "standard_deviation_ddof": 1,
+            "parameters_fitted_on": HEALTHY_TURBINE,
+            "parameters_applied_to": ", ".join(TURBINES),
+        }
     ).to_csv(OUTPUT_DIR / "pca_healthy_autoscaling_parameters.csv", index=False)
+
+
+def save_pretreatment_summary(
+    aligned: dict[str, pd.DataFrame],
+    pca_x: dict[str, pd.DataFrame],
+    constant_variables: list[int],
+    missing_values_before: dict[str, int],
+) -> None:
+    """Save the final cleaning and scaling summary for each retained turbine."""
+    rows = []
+    for name in TURBINES:
+        rows.append(
+            {
+                "turbine": name,
+                "observations": len(pca_x[name]),
+                "variables_after_alignment": aligned[name].shape[1],
+                "final_variables": pca_x[name].shape[1],
+                "missing_values_before": missing_values_before[name],
+                "interpolated_values": (
+                    missing_values_before[name] if name == "No.14WT" else 0
+                ),
+                "missing_values_after": int(pca_x[name].isna().sum().sum()),
+                "removed_zero_variance_variables": ", ".join(
+                    map(str, constant_variables)
+                ),
+                "centering_scaling_reference": HEALTHY_TURBINE,
+            }
+        )
+
+    pd.DataFrame(rows).to_csv(
+        OUTPUT_DIR / "pretreatment_cleaned_data_summary.csv", index=False
+    )
 
 
 def create_pretreated_data_plot(
