@@ -22,7 +22,8 @@ OUTPUT_DIR = PROJECT_DIR / "outputs"
 TURBINES = ["No.2WT", "No.14WT", "No.39WT"]
 COMMON_VARIABLES = list(range(1, 28))
 HEALTHY_TURBINE = "No.2WT"
-EXTREME_VALUE_VARIABLES = [5, 11]
+# These two No.14WT variables illustrate the audit in one focused plot.
+PLOTTED_EXTREME_VALUE_VARIABLES = [5, 11]
 LABEL_OFFSETS = {
     2: (10, 8), 3: (8, 18), 4: (8, 8), 5: (8, 20),
     6: (8, 7), 7: (8, -5), 8: (8, -17), 10: (8, 7),
@@ -63,9 +64,6 @@ def main() -> None:
     assert not aligned["No.14WT"].isna().any().any()
     assert np.isclose(interpolated_value, expected_value)
 
-    # Diagnose the previously observed extreme values without modifying them.
-    create_extreme_value_diagnostics(aligned["No.14WT"])
-
     # Variables 12 and 15 are constant in the healthy turbine. They cannot be
     # autoscaled and contain no variation for the healthy PCA model.
     healthy_aligned = aligned[HEALTHY_TURBINE]
@@ -78,6 +76,10 @@ def main() -> None:
     # healthy-model fitting or any later projection.
     expected_columns = pd.Index(pca_variables)
     assert all(data.columns.equals(expected_columns) for data in pca_x.values())
+
+    # Screen every retained variable for unusual values. The IQR limits are
+    # descriptive diagnostics, not rules for changing measured observations.
+    create_extreme_value_diagnostics(pca_x)
 
     healthy_x = pca_x[HEALTHY_TURBINE]
 
@@ -320,34 +322,46 @@ def create_pretreated_data_plot(
     plt.close(fig)
 
 
-def create_extreme_value_diagnostics(data: pd.DataFrame) -> None:
-    """Summarize and plot candidate extreme values without removing them."""
+def create_extreme_value_diagnostics(
+    data_by_turbine: dict[str, pd.DataFrame]
+) -> None:
+    """Audit all retained variables and plot two No.14WT examples."""
     summaries = []
+
+    for name, data in data_by_turbine.items():
+        for variable in data.columns:
+            values = data[variable]
+            q1 = values.quantile(0.25)
+            q3 = values.quantile(0.75)
+            iqr = q3 - q1
+            lower_limit = q1 - 1.5 * iqr
+            upper_limit = q3 + 1.5 * iqr
+            outside_limits = (values < lower_limit) | (values > upper_limit)
+
+            summaries.append(
+                {
+                    "turbine": name,
+                    "variable": variable,
+                    "lower_iqr_limit": lower_limit,
+                    "upper_iqr_limit": upper_limit,
+                    "values_outside_iqr_limits": int(outside_limits.sum()),
+                    "99th_percentile": values.quantile(0.99),
+                    "maximum": values.max(),
+                    "maximum_observation": values.idxmax() + 1,
+                    "second_largest": values.nlargest(2).iloc[-1],
+                }
+            )
+
+    pd.DataFrame(summaries).to_csv(
+        OUTPUT_DIR / "pretreatment_extreme_value_diagnostics.csv", index=False
+    )
+
+    data = data_by_turbine["No.14WT"]
     fig, axes = plt.subplots(2, 1, figsize=(12, 7), constrained_layout=True)
 
-    for axis, variable in zip(axes, EXTREME_VALUE_VARIABLES):
+    for axis, variable in zip(axes, PLOTTED_EXTREME_VALUE_VARIABLES):
         values = data[variable]
-        q1 = values.quantile(0.25)
-        q3 = values.quantile(0.75)
-        iqr = q3 - q1
-        lower_limit = q1 - 1.5 * iqr
-        upper_limit = q3 + 1.5 * iqr
-        outside_limits = (values < lower_limit) | (values > upper_limit)
         maximum_observation = values.idxmax() + 1
-
-        summaries.append(
-            {
-                "turbine": "No.14WT",
-                "variable": variable,
-                "lower_iqr_limit": lower_limit,
-                "upper_iqr_limit": upper_limit,
-                "values_outside_iqr_limits": int(outside_limits.sum()),
-                "99th_percentile": values.quantile(0.99),
-                "maximum": values.max(),
-                "maximum_observation": maximum_observation,
-                "second_largest": values.nlargest(2).iloc[-1],
-            }
-        )
 
         observation_order = np.arange(1, len(values) + 1)
         axis.plot(observation_order, values, color="tab:blue", linewidth=0.8)
@@ -373,10 +387,6 @@ def create_extreme_value_diagnostics(data: pd.DataFrame) -> None:
     fig.suptitle("No.14WT extreme-value diagnostics (values retained)")
     fig.savefig(OUTPUT_DIR / "pretreatment_extreme_value_diagnostics.png", dpi=160)
     plt.close(fig)
-
-    pd.DataFrame(summaries).to_csv(
-        OUTPUT_DIR / "pretreatment_extreme_value_diagnostics.csv", index=False
-    )
 
 
 def create_pca_plots(
