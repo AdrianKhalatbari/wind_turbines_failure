@@ -1,0 +1,4 @@
+turbine,observations,variables_after_alignment,final_variables,missing_values_before,interpolated_values,missing_values_after,removed_zero_variance_variables,centering_scaling_reference
+No.2WT,1570,27,25,0,0,0,"12, 15",No.2WT
+No.14WT,686,27,25,1,1,0,"12, 15",No.2WT
+No.39WT,1405,27,25,0,0,0,"12, 15",No.2WT

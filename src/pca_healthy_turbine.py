@@ -22,6 +22,8 @@ OUTPUT_DIR = PROJECT_DIR / "outputs"
 TURBINES = ["No.2WT", "No.14WT", "No.39WT"]
 COMMON_VARIABLES = list(range(1, 28))
 HEALTHY_TURBINE = "No.2WT"
+# These two No.14WT variables illustrate the audit in one focused plot.
+PLOTTED_EXTREME_VALUE_VARIABLES = [5, 11]
 LABEL_OFFSETS = {
     2: (10, 8), 3: (8, 18), 4: (8, 8), 5: (8, 20),
     6: (8, 7), 7: (8, -5), 8: (8, -17), 10: (8, 7),
@@ -38,11 +40,29 @@ def main() -> None:
         name: workbook[name].loc[:, COMMON_VARIABLES].copy()
         for name in TURBINES
     }
+    missing_values_before = {
+        name: int(data.isna().sum().sum())
+        for name, data in aligned.items()
+    }
 
-    # The one missing value occurs in a single No.14WT row. Remove that row
-    # rather than inventing a sensor value at an apparent operating transition.
-    missing_rows = aligned["No.14WT"].index[aligned["No.14WT"].isna().any(axis=1)]
-    aligned["No.14WT"] = aligned["No.14WT"].drop(index=missing_rows).reset_index(drop=True)
+    # Preserve the time-series row and estimate the single missing value from
+    # its adjacent observations using linear interpolation in observation order.
+    faulty_x = aligned["No.14WT"]
+    missing_row, missing_column = np.argwhere(faulty_x.isna().to_numpy())[0]
+    missing_variable = faulty_x.columns[missing_column]
+    original_row_count = len(faulty_x)
+    expected_value = (
+        faulty_x.iloc[missing_row - 1, missing_column]
+        + faulty_x.iloc[missing_row + 1, missing_column]
+    ) / 2
+
+    aligned["No.14WT"] = aligned["No.14WT"].interpolate(method="linear", axis=0)
+    interpolated_value = aligned["No.14WT"].iloc[missing_row, missing_column]
+
+    # Verify that interpolation preserves the sequence and fills the known gap.
+    assert len(aligned["No.14WT"]) == original_row_count
+    assert not aligned["No.14WT"].isna().any().any()
+    assert np.isclose(interpolated_value, expected_value)
 
     # Variables 12 and 15 are constant in the healthy turbine. They cannot be
     # autoscaled and contain no variation for the healthy PCA model.
@@ -51,6 +71,16 @@ def main() -> None:
     constant_variables = healthy_std.index[healthy_std == 0].tolist()
     pca_variables = [variable for variable in COMMON_VARIABLES if variable not in constant_variables]
     pca_x = {name: data.loc[:, pca_variables] for name, data in aligned.items()}
+
+    # All turbines must contain the same variables in the same order before
+    # healthy-model fitting or any later projection.
+    expected_columns = pd.Index(pca_variables)
+    assert all(data.columns.equals(expected_columns) for data in pca_x.values())
+
+    # Screen every retained variable for unusual values. The IQR limits are
+    # descriptive diagnostics, not rules for changing measured observations.
+    create_extreme_value_diagnostics(pca_x)
+
     healthy_x = pca_x[HEALTHY_TURBINE]
 
     # Fit pretreatment only on the healthy turbine. Any later turbine must use
@@ -58,7 +88,11 @@ def main() -> None:
     # Autoscaling follows the course guidance that variance acts as a weight.
     healthy_mean = healthy_x.mean()
     healthy_scale = healthy_x.std(ddof=1)
-    healthy_x_scaled = (healthy_x - healthy_mean) / healthy_scale
+    scaled_x = {
+        name: (data - healthy_mean) / healthy_scale
+        for name, data in pca_x.items()
+    }
+    healthy_x_scaled = scaled_x[HEALTHY_TURBINE]
 
     # Compute PCA through economy SVD: scores T = U*S and loadings P = V.
     u, singular_values, vt = np.linalg.svd(healthy_x_scaled.to_numpy(), full_matrices=False)
@@ -78,20 +112,36 @@ def main() -> None:
         explained_ratio,
         cumulative_ratio,
     )
+    save_pretreatment_summary(
+        aligned, pca_x, constant_variables, missing_values_before
+    )
+    create_pretreated_data_plot(scaled_x, pca_variables)
     create_pca_plots(healthy_x, pca_variables, scores, loadings, explained_ratio, cumulative_ratio)
 
     # Report the main pretreatment and PCA results needed for the next step.
     print("Aligned X matrices before PCA variable removal")
     for name, data in aligned.items():
         print(f"{name}: {data.shape[0]} observations x {data.shape[1]} variables")
-    print(f"Removed No.14WT observation: {missing_rows[0] + 1}")
+    print("---")
+    print(
+        f"No.14WT variable {missing_variable}, observation {missing_row + 1}: "
+        f"linear interpolation = {interpolated_value:.0f}; "
+        f"rows preserved = {original_row_count}"
+    )
+    print("---")
     print(f"Excluded zero-variance healthy variables: {constant_variables}")
-    print("PCA-ready aligned X matrices")
+    print("---")
+    print(f"Final variables used for every retained turbine: {pca_variables}")
+    print("---")
+    print("PCA-ready aligned X matrices:")
     for name, data in pca_x.items():
         print(f"{name}: {data.shape[0]} observations x {data.shape[1]} variables")
+    print("---")
     print(f"Final healthy PCA X: {healthy_x.shape[0]} observations x {healthy_x.shape[1]} variables")
+    print("---")
     print("Pretreatment: mean-centering and unit-variance scaling using No.2WT statistics")
     variable_9 = healthy_x[9]
+    print("---")
     print(
         "Variable 9 retained: it is not constant "
         f"({variable_9.nunique()} unique values, raw range "
@@ -110,7 +160,7 @@ def main() -> None:
     for threshold in (0.80, 0.90, 0.95):
         count = int(np.searchsorted(cumulative_ratio, threshold) + 1)
         print(f"Components for {int(threshold * 100)}% cumulative variance: {count}")
-
+    print("---")
     print("\nVariables contributing most to the first three PCs")
     for component in range(3):
         order = np.argsort(np.abs(loadings[:, component]))[::-1][:6]
@@ -128,6 +178,7 @@ def main() -> None:
     print("\nStrongest positive healthy-variable correlations")
     for (first, second), value in pairs.sort_values(ascending=False).head(6).items():
         print(f"Variables {first} and {second}: r = {value:.3f}")
+    print("---")
     print("Strongest negative healthy-variable correlations")
     for (first, second), value in pairs.sort_values().head(6).items():
         print(f"Variables {first} and {second}: r = {value:.3f}")
@@ -197,8 +248,145 @@ def save_numeric_outputs(
     score_table.to_csv(OUTPUT_DIR / "pca_healthy_scores_first5.csv")
 
     pd.DataFrame(
-        {"variable": variables, "healthy_mean": means, "healthy_std": scales}
+        {
+            "variable": variables,
+            "healthy_mean": means,
+            "healthy_std": scales,
+            "standard_deviation_ddof": 1,
+            "parameters_fitted_on": HEALTHY_TURBINE,
+            "parameters_applied_to": ", ".join(TURBINES),
+        }
     ).to_csv(OUTPUT_DIR / "pca_healthy_autoscaling_parameters.csv", index=False)
+
+
+def save_pretreatment_summary(
+    aligned: dict[str, pd.DataFrame],
+    pca_x: dict[str, pd.DataFrame],
+    constant_variables: list[int],
+    missing_values_before: dict[str, int],
+) -> None:
+    """Save the final cleaning and scaling summary for each retained turbine."""
+    rows = []
+    for name in TURBINES:
+        rows.append(
+            {
+                "turbine": name,
+                "observations": len(pca_x[name]),
+                "variables_after_alignment": aligned[name].shape[1],
+                "final_variables": pca_x[name].shape[1],
+                "missing_values_before": missing_values_before[name],
+                "interpolated_values": (
+                    missing_values_before[name] if name == "No.14WT" else 0
+                ),
+                "missing_values_after": int(pca_x[name].isna().sum().sum()),
+                "removed_zero_variance_variables": ", ".join(
+                    map(str, constant_variables)
+                ),
+                "centering_scaling_reference": HEALTHY_TURBINE,
+            }
+        )
+
+    pd.DataFrame(rows).to_csv(
+        OUTPUT_DIR / "pretreatment_cleaned_data_summary.csv", index=False
+    )
+
+
+def create_pretreated_data_plot(
+    scaled_x: dict[str, pd.DataFrame], variables: list[int]
+) -> None:
+    """Visualize the cleaned and autoscaled data for the retained turbines."""
+    fig, axes = plt.subplots(3, 1, figsize=(14, 10), constrained_layout=True)
+
+    for axis, (name, data) in zip(axes, scaled_x.items()):
+        image = axis.imshow(
+            data.to_numpy().T,
+            aspect="auto",
+            cmap="coolwarm",
+            vmin=-4,
+            vmax=4,
+            interpolation="nearest",
+        )
+        axis.set_yticks(np.arange(len(variables)), labels=variables, fontsize=8)
+        axis.set_ylabel("Variable")
+        axis.set_xlabel("Observation order")
+        axis.set_title(f"{name}: cleaned and autoscaled data")
+
+    fig.colorbar(
+        image,
+        ax=axes,
+        label="Autoscaled value (colour display limited to -4 to +4)",
+        shrink=0.9,
+    )
+    fig.suptitle("Pretreated wind-turbine data using healthy-turbine scaling")
+    fig.savefig(OUTPUT_DIR / "pretreatment_autoscaled_data.png", dpi=160)
+    plt.close(fig)
+
+
+def create_extreme_value_diagnostics(
+    data_by_turbine: dict[str, pd.DataFrame]
+) -> None:
+    """Audit all retained variables and plot two No.14WT examples."""
+    summaries = []
+
+    for name, data in data_by_turbine.items():
+        for variable in data.columns:
+            values = data[variable]
+            q1 = values.quantile(0.25)
+            q3 = values.quantile(0.75)
+            iqr = q3 - q1
+            lower_limit = q1 - 1.5 * iqr
+            upper_limit = q3 + 1.5 * iqr
+            outside_limits = (values < lower_limit) | (values > upper_limit)
+
+            summaries.append(
+                {
+                    "turbine": name,
+                    "variable": variable,
+                    "lower_iqr_limit": lower_limit,
+                    "upper_iqr_limit": upper_limit,
+                    "values_outside_iqr_limits": int(outside_limits.sum()),
+                    "99th_percentile": values.quantile(0.99),
+                    "maximum": values.max(),
+                    "maximum_observation": values.idxmax() + 1,
+                    "second_largest": values.nlargest(2).iloc[-1],
+                }
+            )
+
+    pd.DataFrame(summaries).to_csv(
+        OUTPUT_DIR / "pretreatment_extreme_value_diagnostics.csv", index=False
+    )
+
+    data = data_by_turbine["No.14WT"]
+    fig, axes = plt.subplots(2, 1, figsize=(12, 7), constrained_layout=True)
+
+    for axis, variable in zip(axes, PLOTTED_EXTREME_VALUE_VARIABLES):
+        values = data[variable]
+        maximum_observation = values.idxmax() + 1
+
+        observation_order = np.arange(1, len(values) + 1)
+        axis.plot(observation_order, values, color="tab:blue", linewidth=0.8)
+        axis.axhline(
+            values.quantile(0.99),
+            color="tab:orange",
+            linestyle="--",
+            label="99th percentile",
+        )
+        axis.scatter(
+            maximum_observation,
+            values.max(),
+            color="tab:red",
+            s=35,
+            zorder=3,
+            label=f"Maximum (observation {maximum_observation})",
+        )
+        axis.set_ylabel(f"Variable {variable}")
+        axis.grid(alpha=0.25)
+        axis.legend(fontsize=8)
+
+    axes[-1].set_xlabel("Observation order")
+    fig.suptitle("No.14WT extreme-value diagnostics (values retained)")
+    fig.savefig(OUTPUT_DIR / "pretreatment_extreme_value_diagnostics.png", dpi=160)
+    plt.close(fig)
 
 
 def create_pca_plots(
